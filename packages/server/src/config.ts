@@ -48,7 +48,7 @@ export const config = {
   placesCacheTtlMs: int("PLACES_CACHE_TTL_MS", 12 * 60 * 60 * 1000),
   profileCacheTtlMs: int("PROFILE_CACHE_TTL_MS", 7 * 24 * 60 * 60 * 1000),
   /** Required by the OSM usage policies: identify the application. */
-  userAgent: env["OSM_USER_AGENT"] ?? "hangry-helpy/0.1 (local dev; https://github.com/jonasbrossmann/hangry-help)",
+  userAgent: env["OSM_USER_AGENT"] ?? "hangry-helpy/0.1 (local dev; https://github.com/dralucard666/hangry-helpy)",
   overpassEndpoints: (env["OVERPASS_ENDPOINTS"] ??
     "https://overpass.openstreetmap.fr/api/interpreter,https://overpass-api.de/api/interpreter,https://lz4.overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter"
   ).split(",").map((s) => s.trim()).filter(Boolean),
