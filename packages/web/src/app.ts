@@ -14,7 +14,6 @@ const submitBtn = $<HTMLButtonElement>("#submit");
 const surpriseBtn = $<HTMLButtonElement>("#surprise");
 const results = $<HTMLElement>("#results");
 const statusEl = $<HTMLElement>("#model-status");
-const statusText = $<HTMLElement>(".status__text", statusEl);
 const modelName = $<HTMLElement>("#model-name");
 const cardTemplate = $<HTMLTemplateElement>("#card-template");
 
@@ -29,30 +28,27 @@ async function pollHealth(): Promise<void> {
     const res = await fetch("/api/health");
     const h = (await res.json()) as HealthResponse;
     const { phase, progress, name, error } = h.model;
-    statusEl.dataset["phase"] = phase;
     modelReady = phase === "ready";
     switch (phase) {
       case "downloading":
-        statusText.textContent = `Downloading model ${progress !== undefined ? `${Math.round(progress * 100)}%` : ""}`;
+        statusEl.textContent = `Downloading model ${progress !== undefined ? `${Math.round(progress * 100)}%` : ""}`;
         break;
       case "loading":
-        statusText.textContent = "Loading model";
+        statusEl.textContent = "Loading model";
         break;
       case "ready":
-        statusText.textContent = "Model ready";
+        statusEl.textContent = "Model ready";
         modelName.textContent = name;
         break;
       case "error":
-        statusText.textContent = "Model failed";
-        statusText.title = error ?? "";
+        statusEl.textContent = "Model failed";
         break;
       default:
-        statusText.textContent = "Starting";
+        statusEl.textContent = "Starting";
     }
     if (phase !== "ready" && phase !== "error") setTimeout(pollHealth, 1500);
   } catch {
-    statusEl.dataset["phase"] = "error";
-    statusText.textContent = "Server unreachable";
+    statusEl.textContent = "Server unreachable";
     setTimeout(pollHealth, 3000);
   }
 }
@@ -150,8 +146,6 @@ locationInput.addEventListener("input", () => {
 
 function setHint(text: string, tone?: "good" | "bad"): void {
   locationHint.textContent = text;
-  if (tone) locationHint.dataset["tone"] = tone;
-  else delete locationHint.dataset["tone"];
 }
 
 // ---------- Surprise me ----------
@@ -203,7 +197,7 @@ form.addEventListener("submit", async (ev) => {
 function setBusy(busy: boolean): void {
   submitBtn.disabled = busy;
   submitBtn.classList.toggle("is-busy", busy);
-  $<HTMLElement>(".btn__label", submitBtn).textContent = busy ? "Thinking…" : "Feed me";
+  submitBtn.textContent = busy ? "Thinking…" : "Feed me";
 }
 
 // ---------- Rendering ----------
@@ -213,11 +207,11 @@ function renderLoading(): void {
   for (let i = 0; i < 3; i++) {
     const sk = document.createElement("div");
     sk.className = "skeleton";
-    sk.innerHTML = `<span class="rank"></span><div><span class="lg"></span><span class="md"></span><span class="md"></span><span class="sm"></span></div>`;
+    sk.innerHTML = `<span class="square"></span><div><span class="wide"></span><span class="medium"></span><span class="short"></span></div>`;
     results.append(sk);
   }
   const note = document.createElement("p");
-  note.className = "results__loading-note";
+  note.className = "note";
   note.textContent = "Fetching nearby places from OpenStreetMap (a new area can take 5–20 s) and asking the model about each one…";
   results.append(note);
 }
@@ -225,7 +219,7 @@ function renderLoading(): void {
 function renderError(message: string, details?: unknown): void {
   results.replaceChildren();
   const box = document.createElement("div");
-  box.className = "results__error";
+  box.className = "error";
   const strong = document.createElement("strong");
   strong.textContent = "Hmm. ";
   box.append(strong, document.createTextNode(message));
@@ -240,7 +234,7 @@ function renderError(message: string, details?: unknown): void {
 function renderResults(r: RecommendationResponse): void {
   results.replaceChildren();
   const summary = document.createElement("div");
-  summary.className = "results__summary";
+  summary.className = "summary";
   summary.innerHTML = `<span>Near <strong></strong></span><span><strong>${r.candidatesConsidered}</strong> places judged</span><span><strong>${r.model.questionsAsked}</strong> questions</span><span>model <strong>${(r.timings.modelMs / 1000).toFixed(1)}s</strong></span><span>total <strong>${(r.timings.totalMs / 1000).toFixed(1)}s</strong></span>`;
   $<HTMLElement>("strong", summary).textContent = r.resolvedLocation.label;
   results.append(summary);
@@ -251,24 +245,23 @@ function renderResults(r: RecommendationResponse): void {
 function renderCard(item: RankedRestaurant, rank: number): HTMLElement {
   const node = cardTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
   const { restaurant: p, match, badges } = item;
-  if (rank === 1) node.classList.add("card--winner");
-  $<HTMLElement>(".card__rank", node).textContent = String(rank);
-  $<HTMLElement>(".card__title", node).textContent = p.name;
+  if (rank === 1) node.classList.add("winner");
+  $<HTMLElement>(".rank", node).textContent = String(rank);
+  $<HTMLElement>("h2", node).textContent = p.name;
 
   const pct = Math.round(match * 100);
-  const matchEl = $<HTMLElement>(".match", node);
-  matchEl.dataset["tone"] = pct >= 70 ? "high" : pct >= 45 ? "mid" : "low";
-  $<HTMLElement>(".match__text", node).textContent = `${pct}%`;
-  const ring = $<SVGCircleElement>(".match__value", node);
-  requestAnimationFrame(() => requestAnimationFrame(() => (ring.style.strokeDashoffset = String(97.4 * (1 - match)))));
+  $<HTMLElement>(".match", node).classList.add(pct >= 70 ? "high" : pct >= 45 ? "mid" : "low");
+  $<HTMLElement>(".match span", node).textContent = `${pct}%`;
+  const ring = $<SVGCircleElement>(".match .value", node);
+  setTimeout(() => (ring.style.strokeDashoffset = String(97.4 * (1 - match))), 50);
 
   const meta: string[] = [kindLabel(p.kind)];
   if (p.cuisines.length) meta.push(p.cuisines.join(", "));
   meta.push(formatDistance(p.distanceMeters));
   if (p.address) meta.push(p.address);
-  $<HTMLElement>(".card__meta", node).textContent = meta.join(" · ");
+  $<HTMLElement>(".meta", node).textContent = meta.join(" · ");
 
-  $<HTMLElement>(".card__desc", node).textContent = describeForHumans(p);
+  $<HTMLElement>(".desc", node).textContent = describeForHumans(p);
 
   const list = $<HTMLUListElement>(".badges", node);
   for (const b of badges) {
@@ -281,7 +274,7 @@ function renderCard(item: RankedRestaurant, rank: number): HTMLElement {
     list.append(li);
   }
 
-  const links = $<HTMLElement>(".card__links", node);
+  const links = $<HTMLElement>(".links", node);
   const add = (text: string, href: string) => {
     const a = document.createElement("a");
     a.textContent = text;
