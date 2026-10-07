@@ -7,8 +7,7 @@
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@hangry/shared": "workspace:*",

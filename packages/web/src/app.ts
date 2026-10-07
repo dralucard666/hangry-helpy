@@ -1,325 +1,150 @@
-import type { ApiError, Diet, HealthResponse, HungerLevel, LocationInput, Preferences, RankedRestaurant, RecommendationResponse, Taste, Vibe } from "@hangry/shared";
+/**
+ * The whole frontend. Flow: read the form → POST /api/recommend → render three cards.
+ * While the model is still loading, /api/health is polled to show the status pill.
+ */
+import type { ApiErrorBody, HealthResponse, Preferences, RankedRestaurant, RecommendationResponse } from "./types.ts";
 
-const $ = <T extends Element>(sel: string, root: ParentNode = document): T => {
-  const el = root.querySelector<T>(sel);
-  if (!el) throw new Error(`missing element ${sel}`);
-  return el;
-};
-
+const $ = <T extends Element>(selector: string, root: ParentNode = document) => root.querySelector<T>(selector)!;
 const form = $<HTMLFormElement>("#prefs-form");
 const locationInput = $<HTMLInputElement>("#location");
-const locationHint = $<HTMLParagraphElement>("#location-hint");
-const geolocateBtn = $<HTMLButtonElement>("#geolocate");
-const submitBtn = $<HTMLButtonElement>("#submit");
-const surpriseBtn = $<HTMLButtonElement>("#surprise");
+const hint = $<HTMLElement>("#location-hint");
 const results = $<HTMLElement>("#results");
 const statusEl = $<HTMLElement>("#model-status");
-const statusText = $<HTMLElement>(".status__text", statusEl);
-const modelName = $<HTMLElement>("#model-name");
-const cardTemplate = $<HTMLTemplateElement>("#card-template");
+const submitBtn = $<HTMLButtonElement>("#submit");
 
-/** Set when the user pressed "Locate me"; cleared as soon as they type a place. */
-let coords: { lat: number; lon: number } | undefined;
+let coords: { lat: number; lon: number } | undefined; // set by "Locate me"
 let modelReady = false;
 
-// ---------- Model status (polls /api/health until the model is ready) ----------
+// ---------- Model status ----------
 
 async function pollHealth(): Promise<void> {
   try {
-    const res = await fetch("/api/health");
-    const h = (await res.json()) as HealthResponse;
-    const { phase, progress, name, error } = h.model;
+    const health = (await (await fetch("/api/health")).json()) as HealthResponse;
+    const { phase, progress, name, error } = health.model;
     statusEl.dataset["phase"] = phase;
     modelReady = phase === "ready";
-    switch (phase) {
-      case "downloading":
-        statusText.textContent = `Downloading model ${progress !== undefined ? `${Math.round(progress * 100)}%` : ""}`;
-        break;
-      case "loading":
-        statusText.textContent = "Loading model";
-        break;
-      case "ready":
-        statusText.textContent = "Model ready";
-        modelName.textContent = name;
-        break;
-      case "error":
-        statusText.textContent = "Model failed";
-        statusText.title = error ?? "";
-        break;
-      default:
-        statusText.textContent = "Starting";
-    }
-    if (phase !== "ready" && phase !== "error") setTimeout(pollHealth, 1500);
+    const text = { idle: "Starting", downloading: `Downloading model ${Math.round((progress ?? 0) * 100)}%`, loading: "Loading model", ready: "Model ready", error: `Model failed: ${error}` }[phase];
+    $(".status__text", statusEl).textContent = text;
+    if (phase === "ready") $("#model-name").textContent = name;
+    if (!modelReady && phase !== "error") setTimeout(pollHealth, 1500);
   } catch {
-    statusEl.dataset["phase"] = "error";
-    statusText.textContent = "Server unreachable";
+    $(".status__text", statusEl).textContent = "Server unreachable";
     setTimeout(pollHealth, 3000);
   }
 }
 
-// ---------- Form helpers ----------
+// ---------- Form ----------
 
-function radio<T extends string>(name: string): T {
-  const el = form.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`);
-  if (!el) throw new Error(`no ${name} selected`);
-  return el.value as T;
-}
-
-function setRadio(name: string, value: string): void {
-  const el = form.querySelector<HTMLInputElement>(`input[name="${name}"][value="${value}"]`);
-  if (el) el.checked = true;
-}
+const radio = (name: string) => form.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)!.value;
+const slider = (id: string) => Number($<HTMLInputElement>(id).value);
 
 function readPreferences(): Preferences {
   const query = locationInput.value.trim();
-  const location: LocationInput = coords && !query ? { kind: "coords", ...coords } : { kind: "query", query };
   return {
-    location,
+    location: coords && !query ? { kind: "coords", ...coords } : { kind: "query", query },
     radiusMeters: Number(radio("radiusMeters")),
-    diet: radio<Diet>("diet"),
-    taste: radio<Taste>("taste"),
-    budget: Number($<HTMLInputElement>("#budget").value),
-    healthiness: Number($<HTMLInputElement>("#healthiness").value),
-    adventurousness: Number($<HTMLInputElement>("#adventurousness").value),
-    vibe: radio<Vibe>("vibe"),
-    hunger: radio<HungerLevel>("hunger"),
+    diet: radio("diet") as Preferences["diet"],
+    taste: radio("taste") as Preferences["taste"],
+    vibe: radio("vibe") as Preferences["vibe"],
+    hunger: radio("hunger") as Preferences["hunger"],
+    budget: slider("#budget"),
+    healthiness: slider("#healthiness"),
+    adventurousness: slider("#adventurousness"),
     craving: $<HTMLInputElement>("#craving").value.trim(),
   };
 }
 
-const STORAGE_KEY = "hangry-helpy:prefs";
-function persist(p: Preferences): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-  } catch {
-    /* private mode etc. */
-  }
-}
-function restore(): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const p = JSON.parse(raw) as Partial<Preferences>;
-    if (p.location?.kind === "query") locationInput.value = p.location.query;
-    if (p.radiusMeters) setRadio("radiusMeters", String(p.radiusMeters));
-    if (p.diet) setRadio("diet", p.diet);
-    if (p.taste) setRadio("taste", p.taste);
-    if (p.vibe) setRadio("vibe", p.vibe);
-    if (p.hunger) setRadio("hunger", p.hunger);
-    if (typeof p.budget === "number") $<HTMLInputElement>("#budget").value = String(p.budget);
-    if (typeof p.healthiness === "number") $<HTMLInputElement>("#healthiness").value = String(p.healthiness);
-    if (typeof p.adventurousness === "number") $<HTMLInputElement>("#adventurousness").value = String(p.adventurousness);
-    if (typeof p.craving === "string") $<HTMLInputElement>("#craving").value = p.craving;
-  } catch {
-    /* ignore corrupt storage */
-  }
-}
-
-// ---------- Geolocation ----------
-
-geolocateBtn.addEventListener("click", () => {
-  if (!("geolocation" in navigator)) {
-    setHint("Your browser has no geolocation.", "bad");
-    return;
-  }
-  geolocateBtn.disabled = true;
-  setHint("Asking the browser for your position…");
+$("#geolocate").addEventListener("click", () => {
+  hint.textContent = "Asking the browser for your position…";
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       locationInput.value = "";
       locationInput.placeholder = `Current position (${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)})`;
-      setHint("Using your current position. Type a place to override.", "good");
-      geolocateBtn.disabled = false;
+      hint.textContent = "Using your current position. Type a place to override.";
     },
-    (err) => {
-      setHint(`Could not get position: ${err.message}`, "bad");
-      geolocateBtn.disabled = false;
-    },
-    { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
+    (err) => (hint.textContent = `Could not get position: ${err.message}`),
   );
 });
+locationInput.addEventListener("input", () => (coords = undefined));
 
-locationInput.addEventListener("input", () => {
-  if (locationInput.value.trim()) {
-    coords = undefined;
-    locationInput.placeholder = "City, district or address";
-    setHint("Free OpenStreetMap search, nothing leaves your machine except the place name.");
-  }
-});
-
-function setHint(text: string, tone?: "good" | "bad"): void {
-  locationHint.textContent = text;
-  if (tone) locationHint.dataset["tone"] = tone;
-  else delete locationHint.dataset["tone"];
-}
-
-// ---------- Surprise me ----------
-
-surpriseBtn.addEventListener("click", () => {
-  const pick = <T>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]!;
-  setRadio("diet", pick(["any", "any", "meat", "vegetarian", "vegan"]));
-  setRadio("taste", pick(["salty", "either", "sweet"]));
-  setRadio("vibe", pick(["quick-bite", "sit-down", "takeaway", "cafe"]));
-  setRadio("hunger", pick(["snack", "normal", "starving"]));
+$("#surprise").addEventListener("click", () => {
+  const pick = (name: string) => {
+    const inputs = form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`);
+    inputs[Math.floor(Math.random() * inputs.length)]!.checked = true;
+  };
+  ["diet", "taste", "vibe", "hunger"].forEach(pick);
   for (const id of ["#budget", "#healthiness", "#adventurousness"]) $<HTMLInputElement>(id).value = String(Math.round(Math.random() * 100));
-  $<HTMLInputElement>("#craving").value = "";
-  form.animate([{ transform: "rotate(-0.6deg)" }, { transform: "rotate(0.6deg)" }, { transform: "none" }], { duration: 220 });
 });
-
-// ---------- Submit ----------
 
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const prefs = readPreferences();
   if (prefs.location.kind === "query" && !prefs.location.query) {
-    locationInput.focus();
-    setHint("Tell me where you are first.", "bad");
+    hint.textContent = "Tell me where you are first.";
     return;
   }
-  if (!modelReady) {
-    renderError("The decision model is still loading. Give it a second and try again.");
-    return;
-  }
-  persist(prefs);
-  setBusy(true);
+  if (!modelReady) return renderError("The decision model is still loading. Give it a second and try again.");
+
+  submitBtn.disabled = true;
   renderLoading();
   try {
     const res = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(prefs) });
-    const body = (await res.json()) as RecommendationResponse | ApiError;
-    if (!res.ok || "error" in body) {
-      const e = body as ApiError;
-      renderError(e.error ?? `Request failed (${res.status})`, e.details);
-      return;
-    }
-    renderResults(body);
+    const body = (await res.json()) as RecommendationResponse | ApiErrorBody;
+    if ("error" in body) renderError(body.error);
+    else renderResults(body);
   } catch (err) {
-    renderError(err instanceof Error ? err.message : String(err));
+    renderError(String(err));
   } finally {
-    setBusy(false);
+    submitBtn.disabled = false;
   }
 });
-
-function setBusy(busy: boolean): void {
-  submitBtn.disabled = busy;
-  submitBtn.classList.toggle("is-busy", busy);
-  $<HTMLElement>(".btn__label", submitBtn).textContent = busy ? "Thinking…" : "Feed me";
-}
 
 // ---------- Rendering ----------
 
 function renderLoading(): void {
-  results.replaceChildren();
-  for (let i = 0; i < 3; i++) {
-    const sk = document.createElement("div");
-    sk.className = "skeleton";
-    sk.innerHTML = `<span class="rank"></span><div><span class="lg"></span><span class="md"></span><span class="md"></span><span class="sm"></span></div>`;
-    results.append(sk);
-  }
-  const note = document.createElement("p");
-  note.className = "results__loading-note";
-  note.textContent = "Fetching nearby places from OpenStreetMap (a new area can take 5–20 s) and asking the model about each one…";
-  results.append(note);
+  results.innerHTML = `<div class="skeleton"><span class="rank"></span><div><span class="lg"></span><span class="md"></span><span class="sm"></span></div></div>`.repeat(3);
+  results.insertAdjacentHTML("beforeend", `<p class="results__loading-note">Fetching nearby places from OpenStreetMap and asking the model about each one…</p>`);
 }
 
-function renderError(message: string, details?: unknown): void {
-  results.replaceChildren();
-  const box = document.createElement("div");
-  box.className = "results__error";
-  const strong = document.createElement("strong");
-  strong.textContent = "Hmm. ";
-  box.append(strong, document.createTextNode(message));
-  if (details !== undefined) {
-    const pre = document.createElement("pre");
-    pre.textContent = typeof details === "string" ? details : JSON.stringify(details, null, 2);
-    box.append(pre);
-  }
-  results.append(box);
+function renderError(message: string): void {
+  results.innerHTML = `<div class="results__error"><strong>Hmm. </strong></div>`;
+  $(".results__error", results).append(message);
 }
 
 function renderResults(r: RecommendationResponse): void {
-  results.replaceChildren();
-  const summary = document.createElement("div");
-  summary.className = "results__summary";
-  summary.innerHTML = `<span>Near <strong></strong></span><span><strong>${r.candidatesConsidered}</strong> places judged</span><span><strong>${r.model.questionsAsked}</strong> questions</span><span>model <strong>${(r.timings.modelMs / 1000).toFixed(1)}s</strong></span><span>total <strong>${(r.timings.totalMs / 1000).toFixed(1)}s</strong></span>`;
-  $<HTMLElement>("strong", summary).textContent = r.resolvedLocation.label;
-  results.append(summary);
+  results.innerHTML = `<div class="results__summary"><span>Near <strong>${escape(r.resolvedLocation.label)}</strong></span><span><strong>${r.candidatesConsidered}</strong> places judged</span><span>model <strong>${(r.timings.modelMs / 1000).toFixed(1)}s</strong></span><span>total <strong>${(r.timings.totalMs / 1000).toFixed(1)}s</strong></span></div>`;
   r.top.forEach((item, i) => results.append(renderCard(item, i + 1)));
-  if (r.top.length === 0) renderError("The model could not rank anything. Try a wider radius.");
 }
 
-function renderCard(item: RankedRestaurant, rank: number): HTMLElement {
-  const node = cardTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
-  const { restaurant: p, match, badges } = item;
-  if (rank === 1) node.classList.add("card--winner");
-  $<HTMLElement>(".card__rank", node).textContent = String(rank);
-  $<HTMLElement>(".card__title", node).textContent = p.name;
+function renderCard({ restaurant: p, match, badges }: RankedRestaurant, rank: number): HTMLElement {
+  const card = ($<HTMLTemplateElement>("#card-template").content.firstElementChild as HTMLElement).cloneNode(true) as HTMLElement;
+  if (rank === 1) card.classList.add("card--winner");
+  $(".card__rank", card).textContent = String(rank);
+  $(".card__title", card).textContent = p.name;
 
   const pct = Math.round(match * 100);
-  const matchEl = $<HTMLElement>(".match", node);
-  matchEl.dataset["tone"] = pct >= 70 ? "high" : pct >= 45 ? "mid" : "low";
-  $<HTMLElement>(".match__text", node).textContent = `${pct}%`;
-  const ring = $<SVGCircleElement>(".match__value", node);
-  requestAnimationFrame(() => requestAnimationFrame(() => (ring.style.strokeDashoffset = String(97.4 * (1 - match)))));
+  $<HTMLElement>(".match", card).dataset["tone"] = pct >= 70 ? "high" : pct >= 45 ? "mid" : "low";
+  $(".match__text", card).textContent = `${pct}%`;
+  const ring = $<SVGCircleElement>(".match__value", card);
+  setTimeout(() => (ring.style.strokeDashoffset = String(97.4 * (1 - match))), 50);
 
-  const meta: string[] = [kindLabel(p.kind)];
-  if (p.cuisines.length) meta.push(p.cuisines.join(", "));
-  meta.push(formatDistance(p.distanceMeters));
-  if (p.address) meta.push(p.address);
-  $<HTMLElement>(".card__meta", node).textContent = meta.join(" · ");
+  const distance = p.distanceMeters < 950 ? `${Math.round(p.distanceMeters / 10) * 10} m` : `${(p.distanceMeters / 1000).toFixed(1)} km`;
+  $(".card__meta", card).textContent = [p.kind.replace("_", " "), p.cuisines.join(", "), distance, p.address].filter(Boolean).join(" · ");
+  const facts = [p.vegan ? "vegan options" : p.vegetarian ? "vegetarian options" : "", p.takeaway ? "takeaway" : "", p.outdoorSeating ? "outdoor seating" : ""].filter(Boolean).join(", ");
+  $(".card__desc", card).textContent = `${facts ? facts[0]!.toUpperCase() + facts.slice(1) + ". " : ""}${p.openingHours ? `Hours: ${p.openingHours}.` : ""}`;
 
-  $<HTMLElement>(".card__desc", node).textContent = describeForHumans(p);
+  $(".badges", card).innerHTML = badges.map((b) => `<li class="badge">${escape(b.label)}<small>${Math.round(b.probability * 100)}%</small></li>`).join("");
 
-  const list = $<HTMLUListElement>(".badges", node);
-  for (const b of badges) {
-    const li = document.createElement("li");
-    li.className = "badge";
-    li.textContent = b.label;
-    const small = document.createElement("small");
-    small.textContent = `${Math.round(b.probability * 100)}%`;
-    li.append(small);
-    list.append(li);
-  }
-
-  const links = $<HTMLElement>(".card__links", node);
-  const add = (text: string, href: string) => {
-    const a = document.createElement("a");
-    a.textContent = text;
-    a.href = href;
-    a.target = "_blank";
-    a.rel = "noopener";
-    links.append(a);
-  };
-  add("Open in maps", `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`);
-  add("OpenStreetMap", p.osmUrl);
-  if (p.website) add("Website", /^https?:\/\//.test(p.website) ? p.website : `https://${p.website}`);
-  if (p.phone) add("Call", `tel:${p.phone.replace(/\s+/g, "")}`);
-  return node;
+  const links: Array<[string, string]> = [
+    ["Open in maps", `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`],
+    ["OpenStreetMap", `https://www.openstreetmap.org/${p.id}`],
+  ];
+  if (p.website) links.push(["Website", p.website.startsWith("http") ? p.website : `https://${p.website}`]);
+  $(".card__links", card).innerHTML = links.map(([text, href]) => `<a href="${escape(href)}" target="_blank" rel="noopener">${text}</a>`).join("");
+  return card;
 }
 
-function describeForHumans(p: RankedRestaurant["restaurant"]): string {
-  const bits: string[] = [];
-  if (p.vegan) bits.push("vegan options");
-  else if (p.vegetarian) bits.push("vegetarian options");
-  if (p.takeaway) bits.push("takeaway");
-  if (p.delivery) bits.push("delivery");
-  if (p.outdoorSeating) bits.push("outdoor seating");
-  if (p.wheelchair) bits.push("wheelchair accessible");
-  const extras = bits.length ? `${capitalise(bits.join(", "))}.` : "";
-  const hours = p.openingHours ? ` Hours: ${p.openingHours}.` : "";
-  return `${extras}${hours}`.trim() || "No further details on OpenStreetMap yet.";
-}
+const escape = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-function kindLabel(kind: RankedRestaurant["restaurant"]["kind"]): string {
-  return { restaurant: "Restaurant", fast_food: "Fast food", cafe: "Café", ice_cream: "Ice cream", food_court: "Food court", bar: "Bar", pub: "Pub", biergarten: "Beer garden" }[kind];
-}
-
-function formatDistance(m: number): string {
-  return m < 950 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
-}
-
-const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// ---------- Boot ----------
-restore();
 void pollHealth();

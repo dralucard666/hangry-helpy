@@ -1,39 +1,66 @@
-import { createApp } from "./app.ts";
-import { config } from "./config.ts";
-import { flushPlacesCache } from "./places/index.ts";
-import { flushProfileCaches } from "./profile.ts";
-import { SystemOneEngine } from "./systemOne/engine.ts";
+/**
+ * Entry point. Three jobs:
+ *   1. start the HTTP server (API + static frontend),
+ *   2. load the decision model in the background,
+ *   3. route /api/recommend → recommend() and /api/health → model status.
+ */
+import path from "node:path";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { z } from "zod";
+import { DIETS, HUNGER_LEVELS, TASTES, VIBES } from "@hangry/shared";
+import { Model } from "./model.ts";
+import { HttpError, recommend } from "./recommend.ts";
 
-const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+const PORT = Number(process.env["PORT"] ?? 3000);
+const ROOT = path.resolve(import.meta.dirname, "../../..");
+export const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
 
-const engine = new SystemOneEngine({
-  modelUri: config.modelUri,
-  modelsDir: config.modelsDir,
-  sequences: config.modelSequences,
-  contextSize: config.modelContextSize,
-  gpu: config.gpu,
-  readoutTemperature: config.readoutTemperature,
-  log: (m) => log(`model: ${m}`),
+// What the frontend may send. Every field except location has a default.
+const preferencesSchema = z.object({
+  location: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("query"), query: z.string().trim().min(1).max(200) }),
+    z.object({ kind: z.literal("coords"), lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }),
+  ]),
+  radiusMeters: z.number().int().min(300).max(25_000).default(3000),
+  diet: z.enum(DIETS).default("any"),
+  taste: z.enum(TASTES).default("either"),
+  budget: z.number().min(0).max(100).default(50),
+  healthiness: z.number().min(0).max(100).default(50),
+  adventurousness: z.number().min(0).max(100).default(50),
+  vibe: z.enum(VIBES).default("sit-down"),
+  hunger: z.enum(HUNGER_LEVELS).default("normal"),
+  craving: z.string().trim().max(200).default(""),
 });
 
-const app = createApp(engine, log);
-const server = app.listen(config.port, config.host, () => {
-  log(`hangry-helpy listening on http://${config.host}:${config.port} (serving ${config.webDir})`);
+const model = new Model(process.env["MODEL_URI"] ?? "hf:Qwen/Qwen3-1.7B-GGUF:Q8_0", path.join(ROOT, "models"), log);
+const app = express();
+app.use(express.json());
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: model.status.phase === "ready", model: model.status });
 });
 
-// The model loads while the HTTP server is already up; /api/health reports progress to the UI.
-engine.start().catch(() => {
-  /* status is exposed via /api/health; keep the server up so the UI can show the error */
+app.post("/api/recommend", async (req, res, next) => {
+  try {
+    const parsed = preferencesSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, "Invalid preferences", z.treeifyError(parsed.error));
+    res.json(await recommend(model, parsed.data));
+  } catch (err) {
+    next(err);
+  }
 });
 
+app.use(express.static(path.join(ROOT, "packages/web/public")));
 
-const shutdown = async () => {
-  log("shutting down");
-  server.close();
-  flushPlacesCache();
-  flushProfileCaches();
-  await engine.stop().catch(() => {});
-  process.exit(0);
-};
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+// Any error thrown above ends up here and becomes a JSON response.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof HttpError) {
+    res.status(err.status).json({ error: err.message, details: err.details });
+    return;
+  }
+  log(`unhandled error: ${err instanceof Error ? err.stack : String(err)}`);
+  res.status(500).json({ error: "Internal error" });
+});
+
+app.listen(PORT, "127.0.0.1", () => log(`Hangry Helpy on http://127.0.0.1:${PORT}`));
+model.start().catch(() => {}); // failures are visible via /api/health

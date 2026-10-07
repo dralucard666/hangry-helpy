@@ -1,112 +1,71 @@
-/**
- * Types shared between the web client and the server.
- * The server validates incoming JSON against these shapes with zod (see server/src/schema.ts);
- * the client uses them for type-safe fetch calls.
- */
+/** Types shared between the web client and the server. */
 
 export const DIETS = ["any", "meat", "vegetarian", "vegan"] as const;
-export type Diet = (typeof DIETS)[number];
-
 export const TASTES = ["salty", "either", "sweet"] as const;
-export type Taste = (typeof TASTES)[number];
-
 export const VIBES = ["quick-bite", "sit-down", "takeaway", "cafe"] as const;
-export type Vibe = (typeof VIBES)[number];
-
 export const HUNGER_LEVELS = ["snack", "normal", "starving"] as const;
+
+export type Diet = (typeof DIETS)[number];
+export type Taste = (typeof TASTES)[number];
+export type Vibe = (typeof VIBES)[number];
 export type HungerLevel = (typeof HUNGER_LEVELS)[number];
 
-/** Either a city/address string or precise coordinates (from browser geolocation). */
-export type LocationInput =
-  | { kind: "query"; query: string }
-  | { kind: "coords"; lat: number; lon: number };
-
+/** What the frontend sends to POST /api/recommend. Sliders are 0..100. */
 export interface Preferences {
-  location: LocationInput;
-  /** Search radius in meters around the resolved location. */
+  location: { kind: "query"; query: string } | { kind: "coords"; lat: number; lon: number };
   radiusMeters: number;
   diet: Diet;
   taste: Taste;
-  /** 0 = as cheap as possible … 100 = money is no object. */
-  budget: number;
-  /** 0 = greasy fast food … 100 = squeaky-clean healthy. */
-  healthiness: number;
-  /** 0 = comfort classics … 100 = something I've never tried. */
-  adventurousness: number;
+  budget: number; // 0 = cheap … 100 = fancy
+  healthiness: number; // 0 = greasy … 100 = healthy
+  adventurousness: number; // 0 = classic … 100 = something new
   vibe: Vibe;
   hunger: HungerLevel;
-  /** Free-text craving, e.g. "noodles", "something with cheese". */
   craving: string;
 }
 
-export const AMENITY_KINDS = ["restaurant", "fast_food", "cafe", "ice_cream", "food_court", "bar", "pub", "biergarten"] as const;
-export type AmenityKind = (typeof AMENITY_KINDS)[number];
-
-/** A normalised OpenStreetMap food place. */
+/** A food place from OpenStreetMap. */
 export interface Restaurant {
-  /** OSM id, e.g. "node/64723623". */
   id: string;
   name: string;
-  kind: AmenityKind;
+  kind: "restaurant" | "fast_food" | "cafe" | "ice_cream" | "food_court" | "biergarten";
   cuisines: string[];
   lat: number;
   lon: number;
   distanceMeters: number;
-  address?: string;
-  openingHours?: string;
-  website?: string;
-  phone?: string;
-  vegetarian?: boolean;
-  vegan?: boolean;
-  takeaway?: boolean;
-  delivery?: boolean;
-  outdoorSeating?: boolean;
-  wheelchair?: boolean;
-  /** Free-form sentence describing the place for the decision model. */
+  vegetarian: boolean;
+  vegan: boolean;
+  takeaway: boolean;
+  outdoorSeating: boolean;
+  address?: string | undefined;
+  openingHours?: string | undefined;
+  website?: string | undefined;
+  /** One factual paragraph the decision model reads. */
   description: string;
-  osmUrl: string;
 }
 
 export interface Badge {
   label: string;
-  /** 0..1 probability from the decision model. */
-  probability: number;
+  probability: number; // 0..1
 }
 
 export interface RankedRestaurant {
   restaurant: Restaurant;
-  /** 0..1, higher is a better fit. */
-  match: number;
-  /** Decision model confidence for this verdict, 0..1. */
-  confidence: number;
+  match: number; // 0..1
   badges: Badge[];
 }
 
+/** What POST /api/recommend returns. */
 export interface RecommendationResponse {
   resolvedLocation: { label: string; lat: number; lon: number };
   candidatesConsidered: number;
   top: RankedRestaurant[];
-  timings: { geocodeMs: number; placesMs: number; modelMs: number; totalMs: number };
-  model: { name: string; questionsAsked: number };
-  /** Every judged candidate, best first. Only present when requested with ?debug=1. */
-  all?: RankedRestaurant[];
+  timings: { placesMs: number; modelMs: number; totalMs: number };
+  model: string;
 }
 
-export type ModelPhase = "idle" | "downloading" | "loading" | "ready" | "error";
-
+/** What GET /api/health returns. */
 export interface HealthResponse {
   ok: boolean;
-  model: {
-    phase: ModelPhase;
-    name: string;
-    /** 0..1 during download. */
-    progress?: number;
-    error?: string;
-  };
-  uptimeSeconds: number;
-}
-
-export interface ApiError {
-  error: string;
-  details?: unknown;
+  model: { phase: "idle" | "downloading" | "loading" | "ready" | "error"; name: string; progress?: number; error?: string };
 }
