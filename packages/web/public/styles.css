@@ -59,7 +59,7 @@ a {
 
 h1,
 h2,
-.card__rank {
+.rank {
   font-family: "Fraunces", Georgia, serif;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -72,27 +72,27 @@ h2,
   background: radial-gradient(900px 300px at 10% -20%, var(--accent-soft), transparent 70%);
 }
 
-.hero__inner,
+.container,
 .layout,
 .footer {
   max-width: 1080px;
   margin: 0 auto;
 }
 
-.hero__title {
+h1 {
   font-size: clamp(34px, 6vw, 60px);
   line-height: 1.02;
   margin: 14px 0 12px;
 }
 
-.hero__lead {
+.lead {
   max-width: 56ch;
   margin: 0;
   color: var(--text-soft);
   font-size: 16px;
 }
 
-/* The "model ready" pill. The dot colour follows data-phase set by app.ts. */
+/* The "model ready" pill; app.ts fills in the text. */
 .status {
   display: inline-flex;
   align-items: center;
@@ -105,26 +105,6 @@ h2,
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-soft);
-}
-
-.status__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-
-.status[data-phase="downloading"] .status__dot,
-.status[data-phase="loading"] .status__dot {
-  background: var(--warn);
-}
-
-.status[data-phase="ready"] .status__dot {
-  background: var(--good);
-}
-
-.status[data-phase="error"] .status__dot {
-  background: var(--bad);
 }
 
 /* ---------- Layout: form left, results right ---------- */
@@ -160,18 +140,18 @@ h2,
   gap: 8px;
 }
 
-.field__label {
+.field .name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-soft);
 }
 
-.field__optional {
+.optional {
   font-weight: 400;
   color: var(--text-faint);
 }
 
-.field__hint {
+.hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-faint);
@@ -198,23 +178,23 @@ h2,
 }
 
 /* Radio buttons styled as a row of pills: the real input is hidden, the span is the pill. */
-.segmented {
+.choices {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.segmented label {
+.choices label {
   flex: 1;
 }
 
-.segmented input {
+.choices input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-.segmented span {
+.choices span {
   display: block;
   padding: 9px 10px;
   border: 1px solid var(--line);
@@ -227,13 +207,13 @@ h2,
   cursor: pointer;
 }
 
-.segmented input:checked + span {
+.choices input:checked + span {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
 }
 
-.segmented input:focus-visible + span {
+.choices input:focus-visible + span {
   outline: 2px solid var(--accent);
 }
 
@@ -243,14 +223,14 @@ h2,
   gap: 4px;
 }
 
-.slider__labels {
+.slider-labels {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
   color: var(--text-faint);
 }
 
-.slider__labels label {
+.slider-labels label {
   font-weight: 600;
   color: var(--text-soft);
 }
@@ -286,7 +266,7 @@ input[type="range"] {
   cursor: wait;
 }
 
-.btn--primary {
+.btn.primary {
   flex: 1;
   justify-content: center;
   padding: 13px 20px;
@@ -296,7 +276,7 @@ input[type="range"] {
   font-size: 15px;
 }
 
-.btn--ghost {
+.btn.ghost {
   background: transparent;
   color: var(--text-soft);
 }
@@ -308,7 +288,7 @@ input[type="range"] {
   gap: 14px;
 }
 
-.results__empty {
+.empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -322,11 +302,11 @@ input[type="range"] {
   text-align: center;
 }
 
-.results__empty-art {
+.art {
   font-size: 36px;
 }
 
-.results__summary {
+.summary {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -335,18 +315,18 @@ input[type="range"] {
   color: var(--text-soft);
 }
 
-.results__error {
+.error {
   padding: 18px 20px;
   border: 1px solid var(--bad);
   border-radius: var(--radius);
   background: var(--surface);
 }
 
-.results__error strong {
+.error strong {
   color: var(--bad);
 }
 
-.results__loading-note {
+.note {
   text-align: center;
   font-size: 13px;
   color: var(--text-faint);
@@ -372,21 +352,21 @@ input[type="range"] {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-.skeleton .rank {
+.skeleton .square {
   width: 40px;
   height: 40px;
 }
 
-.skeleton .lg {
+.skeleton .wide {
   height: 26px;
   width: 60%;
 }
 
-.skeleton .md {
+.skeleton .medium {
   width: 85%;
 }
 
-.skeleton .sm {
+.skeleton .short {
   width: 40%;
 }
 
@@ -408,12 +388,12 @@ input[type="range"] {
   box-shadow: var(--shadow);
 }
 
-.card--winner {
+.card.winner {
   border-color: var(--accent);
   background: linear-gradient(180deg, var(--accent-soft), var(--surface) 60%);
 }
 
-.card__rank {
+.rank {
   padding-top: 4px;
   font-size: 34px;
   line-height: 1;
@@ -421,43 +401,43 @@ input[type="range"] {
   color: var(--accent);
 }
 
-.card__body {
+.content {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
 }
 
-.card__head {
+.head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
 }
 
-.card__title {
+.card h2 {
   font-size: 24px;
   line-height: 1.1;
 }
 
-.card__meta {
+.meta {
   margin: 0;
   font-size: 13px;
   color: var(--text-soft);
 }
 
-.card__desc {
+.desc {
   margin: 0;
   font-size: 14px;
 }
 
-.card__links {
+.links {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
   font-size: 13px;
 }
 
-.card__links a {
+.links a {
   color: var(--accent);
   font-weight: 500;
   text-decoration: none;
@@ -473,39 +453,39 @@ input[type="range"] {
   flex-shrink: 0;
 }
 
-.match__ring {
+.ring {
   position: absolute;
   inset: 0;
   transform: rotate(-90deg);
 }
 
-.match__track,
-.match__value {
+.track,
+.value {
   fill: none;
   stroke-width: 3.2;
   stroke-linecap: round;
 }
 
-.match__track {
+.track {
   stroke: var(--line);
 }
 
-.match__value {
+.value {
   stroke: var(--good);
   stroke-dasharray: 97.4;
   stroke-dashoffset: 97.4;
   transition: stroke-dashoffset 0.9s ease-out;
 }
 
-.match[data-tone="mid"] .match__value {
+.match.mid .value {
   stroke: var(--warn);
 }
 
-.match[data-tone="low"] .match__value {
+.match.low .value {
   stroke: var(--bad);
 }
 
-.match__text {
+.match span {
   font-size: 13px;
   font-weight: 600;
 }

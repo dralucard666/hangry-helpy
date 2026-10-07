@@ -21,14 +21,12 @@ async function pollHealth(): Promise<void> {
   try {
     const health = (await (await fetch("/api/health")).json()) as HealthResponse;
     const { phase, progress, name, error } = health.model;
-    statusEl.dataset["phase"] = phase;
     modelReady = phase === "ready";
-    const text = { idle: "Starting", downloading: `Downloading model ${Math.round((progress ?? 0) * 100)}%`, loading: "Loading model", ready: "Model ready", error: `Model failed: ${error}` }[phase];
-    $(".status__text", statusEl).textContent = text;
+    statusEl.textContent = { idle: "Starting", downloading: `Downloading model ${Math.round((progress ?? 0) * 100)}%`, loading: "Loading model", ready: "Model ready", error: `Model failed: ${error}` }[phase];
     if (phase === "ready") $("#model-name").textContent = name;
     if (!modelReady && phase !== "error") setTimeout(pollHealth, 1500);
   } catch {
-    $(".status__text", statusEl).textContent = "Server unreachable";
+    statusEl.textContent = "Server unreachable";
     setTimeout(pollHealth, 3000);
   }
 }
@@ -103,36 +101,36 @@ form.addEventListener("submit", async (ev) => {
 // ---------- Rendering ----------
 
 function renderLoading(): void {
-  results.innerHTML = `<div class="skeleton"><span class="rank"></span><div><span class="lg"></span><span class="md"></span><span class="sm"></span></div></div>`.repeat(3);
-  results.insertAdjacentHTML("beforeend", `<p class="results__loading-note">Fetching nearby places from OpenStreetMap and asking the model about each one…</p>`);
+  results.innerHTML = `<div class="skeleton"><span class="square"></span><div><span class="wide"></span><span class="medium"></span><span class="short"></span></div></div>`.repeat(3);
+  results.insertAdjacentHTML("beforeend", `<p class="note">Fetching nearby places from OpenStreetMap and asking the model about each one…</p>`);
 }
 
 function renderError(message: string): void {
-  results.innerHTML = `<div class="results__error"><strong>Hmm. </strong></div>`;
-  $(".results__error", results).append(message);
+  results.innerHTML = `<div class="error"><strong>Hmm. </strong></div>`;
+  $(".error", results).append(message);
 }
 
 function renderResults(r: RecommendationResponse): void {
-  results.innerHTML = `<div class="results__summary"><span>Near <strong>${escape(r.resolvedLocation.label)}</strong></span><span><strong>${r.candidatesConsidered}</strong> places judged</span><span>model <strong>${(r.timings.modelMs / 1000).toFixed(1)}s</strong></span><span>total <strong>${(r.timings.totalMs / 1000).toFixed(1)}s</strong></span></div>`;
+  results.innerHTML = `<div class="summary"><span>Near <strong>${escape(r.resolvedLocation.label)}</strong></span><span><strong>${r.candidatesConsidered}</strong> places judged</span><span>model <strong>${(r.timings.modelMs / 1000).toFixed(1)}s</strong></span><span>total <strong>${(r.timings.totalMs / 1000).toFixed(1)}s</strong></span></div>`;
   r.top.forEach((item, i) => results.append(renderCard(item, i + 1)));
 }
 
 function renderCard({ restaurant: p, match, badges }: RankedRestaurant, rank: number): HTMLElement {
   const card = ($<HTMLTemplateElement>("#card-template").content.firstElementChild as HTMLElement).cloneNode(true) as HTMLElement;
-  if (rank === 1) card.classList.add("card--winner");
-  $(".card__rank", card).textContent = String(rank);
-  $(".card__title", card).textContent = p.name;
+  if (rank === 1) card.classList.add("winner");
+  $(".rank", card).textContent = String(rank);
+  $("h2", card).textContent = p.name;
 
   const pct = Math.round(match * 100);
-  $<HTMLElement>(".match", card).dataset["tone"] = pct >= 70 ? "high" : pct >= 45 ? "mid" : "low";
-  $(".match__text", card).textContent = `${pct}%`;
-  const ring = $<SVGCircleElement>(".match__value", card);
+  $(".match", card).classList.add(pct >= 70 ? "high" : pct >= 45 ? "mid" : "low");
+  $(".match span", card).textContent = `${pct}%`;
+  const ring = $<SVGCircleElement>(".match .value", card);
   setTimeout(() => (ring.style.strokeDashoffset = String(97.4 * (1 - match))), 50);
 
   const distance = p.distanceMeters < 950 ? `${Math.round(p.distanceMeters / 10) * 10} m` : `${(p.distanceMeters / 1000).toFixed(1)} km`;
-  $(".card__meta", card).textContent = [p.kind.replace("_", " "), p.cuisines.join(", "), distance, p.address].filter(Boolean).join(" · ");
+  $(".meta", card).textContent = [p.kind.replace("_", " "), p.cuisines.join(", "), distance, p.address].filter(Boolean).join(" · ");
   const facts = [p.vegan ? "vegan options" : p.vegetarian ? "vegetarian options" : "", p.takeaway ? "takeaway" : "", p.outdoorSeating ? "outdoor seating" : ""].filter(Boolean).join(", ");
-  $(".card__desc", card).textContent = `${facts ? facts[0]!.toUpperCase() + facts.slice(1) + ". " : ""}${p.openingHours ? `Hours: ${p.openingHours}.` : ""}`;
+  $(".desc", card).textContent = `${facts ? facts[0]!.toUpperCase() + facts.slice(1) + ". " : ""}${p.openingHours ? `Hours: ${p.openingHours}.` : ""}`;
 
   $(".badges", card).innerHTML = badges.map((b) => `<li class="badge">${escape(b.label)}<small>${Math.round(b.probability * 100)}%</small></li>`).join("");
 
@@ -141,7 +139,7 @@ function renderCard({ restaurant: p, match, badges }: RankedRestaurant, rank: nu
     ["OpenStreetMap", `https://www.openstreetmap.org/${p.id}`],
   ];
   if (p.website) links.push(["Website", p.website.startsWith("http") ? p.website : `https://${p.website}`]);
-  $(".card__links", card).innerHTML = links.map(([text, href]) => `<a href="${escape(href)}" target="_blank" rel="noopener">${text}</a>`).join("");
+  $(".links", card).innerHTML = links.map(([text, href]) => `<a href="${escape(href)}" target="_blank" rel="noopener">${text}</a>`).join("");
   return card;
 }
 
