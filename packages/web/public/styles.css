@@ -172,11 +172,6 @@ h1 {
   outline-offset: 1px;
 }
 
-.location-row {
-  display: flex;
-  gap: 8px;
-}
-
 /* Radio buttons styled as a row of pills: the real input is hidden, the span is the pill. */
 .choices {
   display: flex;
@@ -241,44 +236,21 @@ input[type="range"] {
 }
 
 /* ---------- Buttons ---------- */
-.actions {
-  display: flex;
-  gap: 10px;
-}
-
 .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 18px;
-  border: 1px solid var(--line);
+  padding: 13px 20px;
+  border: 1px solid var(--accent);
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--accent);
+  color: var(--accent-text);
   font: inherit;
+  font-size: 15px;
   font-weight: 600;
-  white-space: nowrap;
   cursor: pointer;
 }
 
 .btn:disabled {
   opacity: 0.55;
   cursor: wait;
-}
-
-.btn.primary {
-  flex: 1;
-  justify-content: center;
-  padding: 13px 20px;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
-  font-size: 15px;
-}
-
-.btn.ghost {
-  background: transparent;
-  color: var(--text-soft);
 }
 
 /* ---------- Results ---------- */
@@ -330,50 +302,6 @@ input[type="range"] {
   text-align: center;
   font-size: 13px;
   color: var(--text-faint);
-}
-
-/* Grey placeholder boxes while waiting for the server. */
-.skeleton {
-  display: grid;
-  grid-template-columns: 56px 1fr;
-  gap: 14px;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.skeleton span {
-  display: block;
-  height: 14px;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  background: var(--surface-2);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.skeleton .square {
-  width: 40px;
-  height: 40px;
-}
-
-.skeleton .wide {
-  height: 26px;
-  width: 60%;
-}
-
-.skeleton .medium {
-  width: 85%;
-}
-
-.skeleton .short {
-  width: 40%;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.4;
-  }
 }
 
 /* ---------- Result card ---------- */
@@ -443,7 +371,7 @@ input[type="range"] {
   text-decoration: none;
 }
 
-/* The match ring: an SVG circle whose dash offset app.ts sets to 97.4 * (1 - match). */
+/* The match ring: an SVG circle; app.ts sets its dash offset to 97.4 * (1 - match). */
 .match {
   position: relative;
   display: grid;
@@ -473,8 +401,6 @@ input[type="range"] {
 .value {
   stroke: var(--good);
   stroke-dasharray: 97.4;
-  stroke-dashoffset: 97.4;
-  transition: stroke-dashoffset 0.9s ease-out;
 }
 
 .match.mid .value {

@@ -28,13 +28,6 @@ export async function geocode(query: string): Promise<Point> {
   return { lat: Number(hit.lat), lon: Number(hit.lon), label: hit.display_name.split(",").slice(0, 2).join(",") };
 }
 
-/** Coordinates → a label like "Darmstadt, Hessen" (for the result header). */
-export async function reverseGeocode(lat: number, lon: number): Promise<Point> {
-  const url = `https://nominatim.openstreetmap.org/reverse?${new URLSearchParams({ lat: String(lat), lon: String(lon), format: "jsonv2", zoom: "14" })}`;
-  const hit = (await fetchJson(url)) as { display_name?: string };
-  return { lat, lon, label: hit.display_name?.split(",").slice(0, 2).join(",") ?? `${lat.toFixed(3)}, ${lon.toFixed(3)}` };
-}
-
 /** All named food places within `radius` metres, nearest first. One Overpass fetch per ~1 km cell + radius. */
 export async function findPlaces(lat: number, lon: number, radius: number): Promise<Restaurant[]> {
   const key = `${lat.toFixed(2)},${lon.toFixed(2)},${radius}`;

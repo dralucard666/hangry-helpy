@@ -15,12 +15,9 @@ const PORT = Number(process.env["PORT"] ?? 3000);
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 export const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
 
-// What the frontend may send. Every field except location has a default.
+// What the frontend may send. Every field except city has a default.
 const preferencesSchema = z.object({
-  location: z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("query"), query: z.string().trim().min(1).max(200) }),
-    z.object({ kind: z.literal("coords"), lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }),
-  ]),
+  city: z.string().trim().min(1).max(200),
   radiusMeters: z.number().int().min(300).max(25_000).default(3000),
   diet: z.enum(DIETS).default("any"),
   taste: z.enum(TASTES).default("either"),

@@ -12,7 +12,7 @@ export type HungerLevel = (typeof HUNGER_LEVELS)[number];
 
 /** What the frontend sends to POST /api/recommend. Sliders are 0..100. */
 export interface Preferences {
-  location: { kind: "query"; query: string } | { kind: "coords"; lat: number; lon: number };
+  city: string;
   radiusMeters: number;
   diet: Diet;
   taste: Taste;

@@ -8,7 +8,7 @@
 import type { Badge, Preferences, RankedRestaurant, RecommendationResponse, Restaurant } from "@hangry/shared";
 import { jsonCache } from "./cache.ts";
 import type { Model, Question } from "./model.ts";
-import { findPlaces, geocode, reverseGeocode } from "./places.ts";
+import { findPlaces, geocode } from "./places.ts";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
@@ -148,7 +148,7 @@ export async function recommend(model: Model, prefs: Preferences): Promise<Recom
   const t0 = performance.now();
 
   // Where?
-  const origin = prefs.location.kind === "query" ? await geocode(prefs.location.query).catch(notFound) : await reverseGeocode(prefs.location.lat, prefs.location.lon);
+  const origin = await geocode(prefs.city).catch(notFound);
 
   // What's around? Prefer places with real tags (cuisine, diet, hours) and at most two branches per chain.
   const all = await findPlaces(origin.lat, origin.lon, prefs.radiusMeters).catch((e: Error) => {
