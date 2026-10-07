@@ -1,0 +1,8 @@
+node_modules/
+dist/
+packages/web/public/app.js
+packages/web/public/app.js.map
+models/
+.env
+.DS_Store
+.cache/

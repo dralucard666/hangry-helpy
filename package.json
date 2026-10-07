@@ -1,0 +1,16 @@
+{
+  "name": "hangry-helpy",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Decide what to eat today: OpenStreetMap restaurants ranked by a local System-One (OpenJev-style) model.",
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream run dev",
+    "build": "pnpm -r run build",
+    "start": "pnpm --filter @hangry/server run start",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test"
+  }
+}
