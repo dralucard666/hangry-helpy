@@ -59,6 +59,24 @@ Two tricks that matter for a small model:
 
 One extra question *with* the wishes (`FIT`) adds a holistic judgement. The final match is a weighted mix.
 
+## Example requests
+
+
+curl -s -X POST http://127.0.0.1:3000/api/recommend \
+  -H 'Content-Type: application/json' \
+  -d '{"city":"Darmstadt","diet":"vegan","vibe":"quick-bite","budget":20,"craving":"noodles"}'
+
+
+const res = await fetch('/api/recommend', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ city: 'Darmstadt', diet: 'vegan', craving: 'noodles' })
+});
+const data = await res.json();
+console.table(data.top.map(t => ({ name: t.restaurant.name, match: t.match })));
+
+
+
 ## Run it
 
 ```bash
@@ -76,3 +94,5 @@ pnpm dev          # http://127.0.0.1:3000 — the first start downloads the mode
 3. **Show all 30.** Return `ranked` as well as `top` and render a collapsible list in `app.ts`.
 4. **Swap the model.** Set `MODEL_URI=hf:Qwen/Qwen3-0.6B-GGUF:Q8_0`. It's 2× faster. What gets worse? Why?
 5. **Break the cache on purpose.** Delete `.cache/`, time a request, time it again. Where did the seconds go?
+
+
