@@ -18,7 +18,7 @@ handling beyond what is needed. Read it top to bottom in about an hour.
    │                                       ├─ geocode("Darmstadt")      ──────────►  Nominatim  (city → lat/lon)
    │                                       ├─ findPlaces(lat, lon, 3km)  ──────────►  Overpass   (all food places)
    │                                       ├─ pick 30 candidates
-   │                                       ├─ model.ask(place, PROFILE)   (10 scales per place, cached)
+   │                                       ├─ model.ask(place, PROFILE)   (10 scales per place)
    │                                       ├─ model.ask(wishes+place, FIT)
    │                                       └─ combine → match %, badges, top 3
    │  JSON  ◄──────────────────────────── index.ts
@@ -36,7 +36,6 @@ handling beyond what is needed. Read it top to bottom in about an hour.
 | `packages/server/src/places.ts` | OpenStreetMap: geocoding and the Overpass query, plus turning raw OSM tags into a `Restaurant` with a one-paragraph description. |
 | `packages/server/src/model.ts` | The decision model (see below). |
 | `packages/server/src/recommend.ts` | The pipeline: candidates → model questions → ranking. All the "product logic" lives here. |
-| `packages/server/src/cache.ts` | A Map that survives restarts (JSON file in `.cache/`). |
 
 ## The decision model, in plain words
 
@@ -53,7 +52,7 @@ No sampling, no JSON parsing, no malformed answers, and one question costs a few
 Two tricks that matter for a small model:
 
 * **Ask about the place without the user's wishes** (the `PROFILE` questions). If the wishes are in the prompt,
-  the model just agrees with them. The profile is objective and cached per place for a week.
+  the model just agrees with them.
 * **Calibrate across the candidates.** The model answers most scales near the middle. For a ranking only
   differences matter, so each attribute is standardised across the 30 candidates (`calibrate()`).
 
@@ -90,9 +89,10 @@ pnpm dev          # http://127.0.0.1:3000 — the first start downloads the mode
 
 1. **Add a dial.** Add "spicy / mild" to `Preferences`, the form, the zod schema, `describeWishes()` and `criteria()`.
    You will touch every layer once.
-2. **Add a profile attribute.** Add a "kid-friendly" scale to `PROFILE` and a badge for it. Bump the cache key.
+2. **Add a profile attribute.** Add a "kid-friendly" scale to `PROFILE` and a badge for it.
 3. **Show all 30.** Return `ranked` as well as `top` and render a collapsible list in `app.ts`.
 4. **Swap the model.** Set `MODEL_URI=hf:Qwen/Qwen3-0.6B-GGUF:Q8_0`. It's 2× faster. What gets worse? Why?
-5. **Break the cache on purpose.** Delete `.cache/`, time a request, time it again. Where did the seconds go?
+5. **Add a cache.** Every request asks the model the same ten questions about the same places. Store the
+   profiles in a Map keyed by place id, then in a JSON file. How much faster is the second request?
 
 

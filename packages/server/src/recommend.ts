@@ -2,16 +2,16 @@
  * The pipeline behind POST /api/recommend:
  *
  *   preferences ─► geocode ─► findPlaces ─► pick 30 candidates
- *              ─► model: profile each place (cached) + one "fit" question with the wishes
+ *              ─► model: profile each place + one "fit" question with the wishes
  *              ─► combine into a match score, badges, top 3
  */
 import type { Badge, Preferences, RankedRestaurant, RecommendationResponse, Restaurant } from "@hangry/shared";
-import { jsonCache } from "./cache.ts";
 import type { Model, Question } from "./model.ts";
 import { findPlaces, geocode } from "./places.ts";
 
+/** An error with an HTTP status; index.ts turns it into a JSON reply. */
 export class HttpError extends Error {
-  constructor(public status: number, message: string, public details?: unknown) {
+  constructor(public status: number, message: string) {
     super(message);
   }
 }
@@ -19,11 +19,14 @@ export class HttpError extends Error {
 const MAX_CANDIDATES = 30;
 const TOP_N = 3;
 
-// ---------- 1. Objective questions about a place (asked once per place, cached for a week) ----------
+// ---------- 1. Objective questions about a place ----------
 
 const q = (text: string, ...anchors: string[]): Question => ({ text, anchors });
 
-/** Each attribute ends up as a number 0..1 (0 = first anchor, 1 = last). The user's wishes are NOT in this prompt on purpose: a small model otherwise just agrees with them. */
+/**
+ * Each attribute becomes a number 0..1 (0 = first anchor, 1 = last).
+ * The user's wishes are NOT in this prompt on purpose: a small model otherwise just agrees with them.
+ */
 const PROFILE = {
   price: q("Price level, judging from the type of place?", "cheap: snack bar, kebab, fast food, bakery", "mid-range restaurant", "upscale, expensive"),
   speed: q("How fast is the food?", "minutes: counter, takeaway, fast food", "normal restaurant pace", "slow multi-course meal"),
@@ -38,31 +41,7 @@ const PROFILE = {
 };
 type Profile = Record<keyof typeof PROFILE, number> & { craving?: number };
 
-const profileCache = jsonCache<Record<string, number>>("profiles", 7 * 24 * 60 * 60 * 1000);
-
-async function profile(model: Model, place: Restaurant, craving: string, background = false): Promise<Profile> {
-  const key = `${place.id}|${place.description.length}`;
-  let attrs = profileCache.get(key);
-  if (!attrs) {
-    attrs = await model.ask(`place: ${place.description}`, PROFILE, background);
-    profileCache.set(key, attrs);
-  }
-  const result = { ...attrs } as Profile;
-  if (craving) {
-    const cravingKey = `${key}|${craving.toLowerCase()}`;
-    let c = profileCache.get(cravingKey)?.["craving"];
-    if (c === undefined) {
-      const text = `Does this place serve "${craving}"?`;
-      c = (await model.ask(`place: ${place.description}`, { craving: q(text, "no, does not fit this food", "maybe a dish or two", "yes, typical thing to order here") }, background))["craving"]!;
-      profileCache.set(cravingKey, { craving: c });
-    }
-    result.craving = c;
-  }
-  return result;
-}
-
-// ---------- 2. The user's wishes, as sentences for the "fit" question and as criteria over the profile ----------
-
+/** One holistic question that DOES see the wishes. */
 const FIT = q(
   "How well does this place fit what the user wants today? Be strict: 4 only if every wish is met, 0 or 1 if the diet or the specific craving is violated.",
   "would hate it, clearly wrong for today",
@@ -72,27 +51,27 @@ const FIT = q(
   "perfect, exactly what they want today",
 );
 
+// ---------- 2. The user's wishes: as sentences for the fit question, as criteria over the profile ----------
+
 function describeWishes(p: Preferences): string {
-  const pick = <T extends string>(value: T, options: Record<T, string>) => options[value];
   const level = (v: number, low: string, mid: string, high: string) => (v < 34 ? low : v < 67 ? mid : high);
-  return [
-    `diet: ${pick(p.diet, { any: "eats everything", meat: "wants meat or fish", vegetarian: "vegetarian, no meat or fish", vegan: "vegan, no animal products" })}`,
-    `taste: ${pick(p.taste, { salty: "craves something savoury", sweet: "craves something sweet", either: "sweet or savoury, no preference" })}`,
+  const lines = [
+    `diet: ${{ any: "eats everything", meat: "wants meat or fish", vegetarian: "vegetarian, no meat or fish", vegan: "vegan, no animal products" }[p.diet]}`,
+    `taste: ${{ salty: "craves something savoury", sweet: "craves something sweet", either: "sweet or savoury, no preference" }[p.taste]}`,
     `budget: ${level(p.budget, "as cheap as possible", "normal restaurant prices are fine", "money is no object, wants a treat")}`,
     `health: ${level(p.healthiness, "greasy comfort or fast food is fine", "something reasonably balanced", "very healthy, light, fresh food")}`,
     `adventure: ${level(p.adventurousness, "a familiar classic", "open to anything", "something new, unusual or exotic")}`,
-    `setting: ${pick(p.vibe, { "quick-bite": "a quick bite, no long waiting", "sit-down": "sit down and relax for a proper meal", takeaway: "takeaway to eat elsewhere", cafe: "café vibe: coffee, cake, lingering" })}`,
-    `hunger: ${pick(p.hunger, { snack: "only a little hungry", normal: "normally hungry", starving: "starving, needs a big portion" })}`,
-    p.craving && `specific craving: ${p.craving}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `setting: ${{ "quick-bite": "a quick bite, no long waiting", "sit-down": "sit down and relax for a proper meal", takeaway: "takeaway to eat elsewhere", cafe: "café vibe: coffee, cake, lingering" }[p.vibe]}`,
+    `hunger: ${{ snack: "only a little hungry", normal: "normally hungry", starving: "starving, needs a big portion" }[p.hunger]}`,
+  ];
+  if (p.craving) lines.push(`specific craving: ${p.craving}`);
+  return lines.join("\n");
 }
 
 interface Criterion {
   label: string; // badge text
   weight: number; // diet and craving count double
-  satisfied: (pr: Profile) => number; // 0..1
+  score: (pr: Profile) => number; // 0..1
   badge: boolean; // mid-range sliders rank but don't earn a badge
 }
 
@@ -103,28 +82,27 @@ function criteria(p: Preferences): Criterion[] {
   const near = (k: keyof Profile, target: number) => (pr: Profile) => 1 - Math.abs((pr[k] ?? 0.5) - target);
   const mid = (v: number) => v >= 35 && v <= 65;
   const c: Criterion[] = [];
-  if (p.diet === "vegetarian") c.push({ label: "Veggie-friendly", weight: 2, satisfied: want("vegetarian"), badge: true });
-  if (p.diet === "vegan") c.push({ label: "Vegan-friendly", weight: 2, satisfied: want("vegan"), badge: true });
-  if (p.diet === "meat") c.push({ label: "Meaty", weight: 1.5, satisfied: want("meat"), badge: true });
-  if (p.taste === "sweet") c.push({ label: "Sweet tooth", weight: 1.5, satisfied: want("sweet"), badge: true });
-  if (p.taste === "salty") c.push({ label: "Savoury", weight: 1, satisfied: avoid("sweet"), badge: true });
-  c.push({ label: p.budget < 40 ? "Easy on the wallet" : "Worth the splurge", weight: 1, satisfied: near("price", p.budget / 100), badge: !mid(p.budget) });
-  c.push({ label: p.healthiness > 60 ? "Fresh & healthy" : "Comfort food", weight: 1, satisfied: near("healthy", p.healthiness / 100), badge: !mid(p.healthiness) });
-  c.push({ label: p.adventurousness > 66 ? "Something different" : "Safe classic", weight: 0.75, satisfied: near("exotic", p.adventurousness / 100), badge: !mid(p.adventurousness) });
-  if (p.vibe === "quick-bite") c.push({ label: "Quick", weight: 1, satisfied: avoid("speed"), badge: true });
-  if (p.vibe === "takeaway") c.push({ label: "Takeaway-friendly", weight: 1, satisfied: (pr) => (avoid("sitdown")(pr) + avoid("speed")(pr)) / 2, badge: true });
-  if (p.vibe === "sit-down") c.push({ label: "Sit-down meal", weight: 1, satisfied: want("sitdown"), badge: true });
-  if (p.vibe === "cafe") c.push({ label: "Café vibe", weight: 1.5, satisfied: want("cafe"), badge: true });
-  if (p.hunger === "starving") c.push({ label: "Fills you up", weight: 0.75, satisfied: (pr) => (want("sitdown")(pr) + avoid("cafe")(pr)) / 2, badge: true });
-  if (p.hunger === "snack") c.push({ label: "Snack-sized", weight: 0.75, satisfied: (pr) => (want("cafe")(pr) + avoid("speed")(pr)) / 2, badge: true });
-  if (p.craving) c.push({ label: `Has "${p.craving}"`, weight: 2, satisfied: want("craving"), badge: true });
+  if (p.diet === "vegetarian") c.push({ label: "Veggie-friendly", weight: 2, score: want("vegetarian"), badge: true });
+  if (p.diet === "vegan") c.push({ label: "Vegan-friendly", weight: 2, score: want("vegan"), badge: true });
+  if (p.diet === "meat") c.push({ label: "Meaty", weight: 1.5, score: want("meat"), badge: true });
+  if (p.taste === "sweet") c.push({ label: "Sweet tooth", weight: 1.5, score: want("sweet"), badge: true });
+  if (p.taste === "salty") c.push({ label: "Savoury", weight: 1, score: avoid("sweet"), badge: true });
+  c.push({ label: p.budget < 40 ? "Easy on the wallet" : "Worth the splurge", weight: 1, score: near("price", p.budget / 100), badge: !mid(p.budget) });
+  c.push({ label: p.healthiness > 60 ? "Fresh & healthy" : "Comfort food", weight: 1, score: near("healthy", p.healthiness / 100), badge: !mid(p.healthiness) });
+  c.push({ label: p.adventurousness > 66 ? "Something different" : "Safe classic", weight: 0.75, score: near("exotic", p.adventurousness / 100), badge: !mid(p.adventurousness) });
+  if (p.vibe === "quick-bite") c.push({ label: "Quick", weight: 1, score: avoid("speed"), badge: true });
+  if (p.vibe === "takeaway") c.push({ label: "Takeaway-friendly", weight: 1, score: (pr) => (avoid("sitdown")(pr) + avoid("speed")(pr)) / 2, badge: true });
+  if (p.vibe === "sit-down") c.push({ label: "Sit-down meal", weight: 1, score: want("sitdown"), badge: true });
+  if (p.vibe === "cafe") c.push({ label: "Café vibe", weight: 1.5, score: want("cafe"), badge: true });
+  if (p.hunger === "starving") c.push({ label: "Fills you up", weight: 0.75, score: (pr) => (want("sitdown")(pr) + avoid("cafe")(pr)) / 2, badge: true });
+  if (p.hunger === "snack") c.push({ label: "Snack-sized", weight: 0.75, score: (pr) => (want("cafe")(pr) + avoid("speed")(pr)) / 2, badge: true });
+  if (p.craving) c.push({ label: `Has "${p.craving}"`, weight: 2, score: want("craving"), badge: true });
   return c;
 }
 
 /**
  * The model answers most scales near the middle. Only differences between candidates matter for a
- * ranking, so each attribute is blended with its standardised value across the candidate set:
- * attributes with real spread get amplified, attributes the model can't judge stay flat.
+ * ranking, so each attribute is blended with its standardised value across the candidate set.
  */
 function calibrate(profiles: Profile[]): Profile[] {
   const out = profiles.map((p) => ({ ...p }));
@@ -147,13 +125,16 @@ export async function recommend(model: Model, prefs: Preferences): Promise<Recom
   if (model.status.phase !== "ready") throw new HttpError(503, `Decision model is ${model.status.phase}, try again in a moment.`);
   const t0 = performance.now();
 
-  // Where?
-  const origin = await geocode(prefs.city).catch(notFound);
-
-  // What's around? Prefer places with real tags (cuisine, diet, hours) and at most two branches per chain.
+  // Where? What's around?
+  const origin = await geocode(prefs.city).catch((e: Error) => {
+    throw new HttpError(404, e.message);
+  });
   const all = await findPlaces(origin.lat, origin.lon, prefs.radiusMeters).catch((e: Error) => {
     throw new HttpError(503, e.message);
   });
+
+  // Prefer places with real tags (cuisine, hours, diet) and at most two branches of one chain.
+  const richness = (r: Restaurant) => (r.cuisines.length ? 2 : 0) + (r.openingHours ? 1 : 0) + (r.vegetarian ? 1 : 0) + (r.address ? 0.5 : 0);
   const seenNames = new Map<string, number>();
   const candidates = [...all]
     .sort((a, b) => richness(b) - richness(a))
@@ -166,38 +147,34 @@ export async function recommend(model: Model, prefs: Preferences): Promise<Recom
   if (candidates.length === 0) throw new HttpError(404, `No restaurants found within ${prefs.radiusMeters / 1000} km of ${origin.label}.`);
   const placesMs = performance.now() - t0;
 
-  // Ask the model: profile (cached) + fit, for all candidates in parallel.
+  // Ask the model about every candidate, one after another.
   const wishes = describeWishes(prefs);
-  const judged = await Promise.all(
-    candidates.map(async (place) => ({
-      place,
-      profile: await profile(model, place, prefs.craving),
-      fit: (await model.ask(`what the user wants today:\n${wishes}\n\ncandidate place: ${place.description}`, { fit: FIT }))["fit"]!,
-    })),
-  );
+  const profiles: Profile[] = [];
+  const fits: number[] = [];
+  for (const place of candidates) {
+    const questions: Record<string, Question> = { ...PROFILE };
+    if (prefs.craving) questions["craving"] = q(`Does this place serve "${prefs.craving}"?`, "no, does not fit this food", "maybe a dish or two", "yes, typical thing to order here");
+    profiles.push((await model.ask(`place: ${place.description}`, questions)) as Profile);
+    fits.push((await model.ask(`what the user wants today:\n${wishes}\n\ncandidate place: ${place.description}`, { fit: FIT }))["fit"]!);
+  }
 
   // Combine: weighted criteria over the calibrated profile + the holistic fit score.
   const crit = criteria(prefs);
-  const profiles = calibrate(judged.map((j) => j.profile));
-  const ranked: RankedRestaurant[] = judged.map((j, i) => {
-    let score = 1.5 * j.fit;
+  const calibrated = calibrate(profiles);
+  const ranked: RankedRestaurant[] = candidates.map((place, i) => {
+    let total = 1.5 * fits[i]!;
     let weights = 1.5;
     const badges: Badge[] = [];
     for (const c of crit) {
-      const s = clamp(c.satisfied(profiles[i]!));
-      score += c.weight * s;
+      const s = clamp(c.score(calibrated[i]!));
+      total += c.weight * s;
       weights += c.weight;
       if (c.badge && s >= 0.62) badges.push({ label: c.label, probability: s });
     }
-    return { restaurant: j.place, match: score / weights, badges: badges.sort((a, b) => b.probability - a.probability) };
+    return { restaurant: place, match: total / weights, badges: badges.sort((a, b) => b.probability - a.probability) };
   });
   ranked.sort((a, b) => b.match - a.match);
   const top = ranked.filter((r, i) => ranked.findIndex((o) => o.restaurant.name === r.restaurant.name) === i).slice(0, TOP_N);
-
-  // Quietly profile the rest of the area so the next request with other dials is fast.
-  void (async () => {
-    for (const place of all.filter((r) => !candidates.includes(r)).slice(0, 150)) await profile(model, place, "", true).catch(() => {});
-  })();
 
   return {
     resolvedLocation: origin,
@@ -207,8 +184,3 @@ export async function recommend(model: Model, prefs: Preferences): Promise<Recom
     model: model.status.name,
   };
 }
-
-const richness = (r: Restaurant) => (r.cuisines.length ? 2 : 0) + (r.openingHours ? 1 : 0) + (r.vegetarian ? 1 : 0) + (r.address ? 0.5 : 0);
-const notFound = (e: Error) => {
-  throw new HttpError(404, e.message);
-};

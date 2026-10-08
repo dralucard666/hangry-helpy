@@ -3,7 +3,6 @@
  * without an account: Nominatim for geocoding, the Overpass API for places.
  */
 import type { Restaurant } from "@hangry/shared";
-import { jsonCache } from "./cache.ts";
 
 const USER_AGENT = "hangry-helpy/0.1 (local dev)"; // OSM asks every client to identify itself
 const OVERPASS_MIRRORS = [
@@ -11,7 +10,6 @@ const OVERPASS_MIRRORS = [
   "https://overpass-api.de/api/interpreter",
   "https://lz4.overpass-api.de/api/interpreter",
 ];
-const placesCache = jsonCache<Restaurant[]>("places", 12 * 60 * 60 * 1000);
 
 export interface Point {
   lat: number;
@@ -20,27 +18,12 @@ export interface Point {
 }
 
 /** "Darmstadt" → coordinates + a label. */
-export async function geocode(query: string): Promise<Point> {
-  const url = `https://nominatim.openstreetmap.org/search?${new URLSearchParams({ q: query, format: "jsonv2", limit: "1" })}`;
+export async function geocode(city: string): Promise<Point> {
+  const url = `https://nominatim.openstreetmap.org/search?${new URLSearchParams({ q: city, format: "jsonv2", limit: "1" })}`;
   const hits = (await fetchJson(url)) as Array<{ lat: string; lon: string; display_name: string }>;
   const hit = hits[0];
-  if (!hit) throw new Error(`Could not find "${query}" on the map. Try a city name.`);
+  if (!hit) throw new Error(`Could not find "${city}" on the map. Try a city name.`);
   return { lat: Number(hit.lat), lon: Number(hit.lon), label: hit.display_name.split(",").slice(0, 2).join(",") };
-}
-
-/** All named food places within `radius` metres, nearest first. One Overpass fetch per ~1 km cell + radius. */
-export async function findPlaces(lat: number, lon: number, radius: number): Promise<Restaurant[]> {
-  const key = `${lat.toFixed(2)},${lon.toFixed(2)},${radius}`;
-  let places = placesCache.get(key);
-  if (!places) {
-    const elements = await queryOverpass(lat, lon, radius);
-    places = elements.map(toRestaurant).filter((r): r is Restaurant => r !== undefined);
-    placesCache.set(key, places);
-  }
-  return places
-    .map((r) => ({ ...r, distanceMeters: distance(lat, lon, r.lat, r.lon) }))
-    .filter((r) => r.distanceMeters <= radius)
-    .sort((a, b) => a.distanceMeters - b.distanceMeters);
 }
 
 interface OverpassElement {
@@ -53,11 +36,11 @@ interface OverpassElement {
 }
 
 /**
+ * All named food places within `radius` metres, nearest first.
  * Public Overpass mirrors are individually flaky, so we ask all of them at once and take the first
- * good answer. A bounding box is much cheaper for Overpass than an `around:` circle; we filter by
- * real distance afterwards.
+ * good answer. A bounding box is much cheaper for Overpass than a circle; we filter by distance after.
  */
-async function queryOverpass(lat: number, lon: number, radius: number): Promise<OverpassElement[]> {
+export async function findPlaces(lat: number, lon: number, radius: number): Promise<Restaurant[]> {
   const dLat = radius / 111_320;
   const dLon = radius / (111_320 * Math.cos((lat * Math.PI) / 180));
   const bbox = `(${lat - dLat},${lon - dLon},${lat + dLat},${lon + dLon})`;
@@ -67,18 +50,27 @@ async function queryOverpass(lat: number, lon: number, radius: number): Promise<
   nw["shop"~"^(bakery|pastry|ice_cream|confectionery)$"]["name"]${bbox};
 );
 out center tags qt 800;`;
+
+  let elements: OverpassElement[];
   try {
-    const json = await Promise.any(
+    const answer = await Promise.any(
       OVERPASS_MIRRORS.map(async (mirror) => {
         const res = (await fetchJson(mirror, { method: "POST", body: new URLSearchParams({ data: query }) })) as { elements?: OverpassElement[] };
         if (!res.elements?.length) throw new Error("empty");
-        return res;
+        return res.elements;
       }),
     );
-    return json.elements ?? [];
+    elements = answer;
   } catch {
     throw new Error("OpenStreetMap servers are not answering right now, please retry in a moment.");
   }
+
+  return elements
+    .map(toRestaurant)
+    .filter((r): r is Restaurant => r !== undefined)
+    .map((r) => ({ ...r, distanceMeters: distance(lat, lon, r.lat, r.lon) }))
+    .filter((r) => r.distanceMeters <= radius)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
 }
 
 const KIND_LABEL: Record<string, string> = { restaurant: "restaurant", fast_food: "fast food place", cafe: "café", ice_cream: "ice cream parlour", food_court: "food court", biergarten: "beer garden" };
@@ -116,23 +108,21 @@ function toRestaurant(el: OverpassElement): Restaurant | undefined {
   const facts = [cuisines.length ? `${name} is a ${KIND_LABEL[kind]} serving ${cuisines.join(", ")}.` : `${name} is a ${KIND_LABEL[kind]} (cuisine not listed).`];
   if (r.vegan) facts.push("Offers vegan options.");
   else if (r.vegetarian) facts.push("Offers vegetarian options.");
-  if (tags["diet:vegetarian"] === "no") facts.push("No vegetarian options.");
   const service = [r.takeaway && "takeaway", yes("delivery") && "delivery", r.outdoorSeating && "outdoor seating"].filter(Boolean);
   if (service.length) facts.push(`Has ${service.join(", ")}.`);
-  if (tags["description"]) facts.push(tags["description"]);
   if (r.openingHours) facts.push(`Opening hours: ${r.openingHours}.`);
   r.description = facts.join(" ");
   return r;
 }
 
 async function fetchJson(url: string, init: RequestInit = {}): Promise<unknown> {
-  const res = await fetch(url, { ...init, headers: { "User-Agent": USER_AGENT, ...init.headers }, signal: AbortSignal.timeout(20_000) });
+  const res = await fetch(url, { ...init, headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
   return res.json();
 }
 
 /** Metres between two coordinates (haversine). */
-export function distance(aLat: number, aLon: number, bLat: number, bLon: number): number {
+function distance(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const rad = (d: number) => (d * Math.PI) / 180;
   const h = Math.sin(rad(bLat - aLat) / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(rad(bLon - aLon) / 2) ** 2;
   return 2 * 6_371_000 * Math.asin(Math.sqrt(h));

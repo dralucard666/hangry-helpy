@@ -12,8 +12,7 @@ import { Model } from "./model.ts";
 import { HttpError, recommend } from "./recommend.ts";
 
 const PORT = Number(process.env["PORT"] ?? 3000);
-const ROOT = path.resolve(import.meta.dirname, "../../..");
-export const log = (msg: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+const WEB_DIR = path.resolve(import.meta.dirname, "../../web/public");
 
 // What the frontend may send. Every field except city has a default.
 const preferencesSchema = z.object({
@@ -29,7 +28,7 @@ const preferencesSchema = z.object({
   craving: z.string().trim().max(200).default(""),
 });
 
-const model = new Model(process.env["MODEL_URI"] ?? "hf:Qwen/Qwen3-1.7B-GGUF:Q8_0", path.join(ROOT, "models"), log);
+const model = new Model(process.env["MODEL_URI"] ?? "hf:Qwen/Qwen3-1.7B-GGUF:Q8_0");
 const app = express();
 app.use(express.json());
 
@@ -40,24 +39,26 @@ app.get("/api/health", (_req, res) => {
 app.post("/api/recommend", async (req, res, next) => {
   try {
     const parsed = preferencesSchema.safeParse(req.body);
-    if (!parsed.success) throw new HttpError(400, "Invalid preferences", z.treeifyError(parsed.error));
+    if (!parsed.success) throw new HttpError(400, `Invalid preferences: ${z.prettifyError(parsed.error)}`);
     res.json(await recommend(model, parsed.data));
   } catch (err) {
     next(err);
   }
 });
 
-app.use(express.static(path.join(ROOT, "packages/web/public")));
+app.use(express.static(WEB_DIR));
 
 // Any error thrown above ends up here and becomes a JSON response.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof HttpError) {
-    res.status(err.status).json({ error: err.message, details: err.details });
+    res.status(err.status).json({ error: err.message });
     return;
   }
-  log(`unhandled error: ${err instanceof Error ? err.stack : String(err)}`);
+  console.error(err);
   res.status(500).json({ error: "Internal error" });
 });
 
-app.listen(PORT, "127.0.0.1", () => log(`Hangry Helpy on http://127.0.0.1:${PORT}`));
-model.start().catch(() => {}); // failures are visible via /api/health
+app.listen(PORT, "127.0.0.1", () => console.log(`Hangry Helpy on http://127.0.0.1:${PORT}`));
+model.start().catch((err) => {
+  model.status = { phase: "error", name: String(model.status.name), error: String(err) };
+});
